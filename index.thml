@@ -1,0 +1,446 @@
+from pathlib import Path
+import zipfile
+
+base = Path("/mnt/data/checklist_oficinas")
+base.mkdir(exist_ok=True)
+
+index_html = """<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Checklist de Oficinas</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>Checklist de Oficinas</h1>
+      <p>Control de bienes, estado y observaciones por ambiente</p>
+    </header>
+
+    <section class="card">
+      <h2>Datos generales</h2>
+      <div class="grid">
+        <label>Fecha
+          <input type="date" id="fecha">
+        </label>
+        <label>Inspector
+          <input type="text" id="inspector" placeholder="Nombre del responsable">
+        </label>
+        <label>Sede / oficina
+          <input type="text" id="sede" placeholder="Ej. Oficina principal">
+        </label>
+        <label>Área
+          <input type="text" id="area" placeholder="Ej. Administración">
+        </label>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-header">
+        <h2>Registro de ítems</h2>
+        <button onclick="agregarFila()">+ Agregar ítem</button>
+      </div>
+
+      <div class="table-wrap">
+        <table id="tabla">
+          <thead>
+            <tr>
+              <th>Ambiente</th>
+              <th>Ítem</th>
+              <th>Cantidad</th>
+              <th>Estado</th>
+              <th>Observación</th>
+              <th>Acción</th>
+            </tr>
+          </thead>
+          <tbody id="cuerpoTabla"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Resumen</h2>
+      <div class="summary">
+        <div><span id="total">0</span><small>Total</small></div>
+        <div><span id="bueno">0</span><small>Bueno</small></div>
+        <div><span id="regular">0</span><small>Regular</small></div>
+        <div><span id="malo">0</span><small>Malo</small></div>
+        <div><span id="faltante">0</span><small>Faltante</small></div>
+      </div>
+    </section>
+
+    <div class="actions">
+      <button onclick="guardar()">Guardar avance</button>
+      <button onclick="descargarCSV()">Descargar Excel / CSV</button>
+      <button class="danger" onclick="limpiar()">Limpiar todo</button>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
+"""
+
+style_css = """* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: #eef3f8;
+  color: #1f2937;
+}
+
+.app {
+  max-width: 1100px;
+  margin: auto;
+  padding: 20px;
+}
+
+header {
+  background: #173b63;
+  color: white;
+  padding: 24px;
+  border-radius: 18px;
+  margin-bottom: 18px;
+  text-align: center;
+}
+
+header h1 {
+  margin: 0;
+  font-size: 30px;
+}
+
+header p {
+  margin: 8px 0 0;
+  opacity: 0.85;
+}
+
+.card {
+  background: white;
+  border-radius: 16px;
+  padding: 18px;
+  margin-bottom: 16px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.08);
+}
+
+h2 {
+  margin-top: 0;
+  color: #173b63;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+label {
+  font-weight: bold;
+  font-size: 13px;
+}
+
+input, select, textarea {
+  width: 100%;
+  padding: 10px;
+  margin-top: 6px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 42px;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+button {
+  background: #173b63;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  padding: 11px 16px;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+button:hover {
+  opacity: 0.9;
+}
+
+.danger {
+  background: #b91c1c;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 850px;
+}
+
+th {
+  background: #f1f5f9;
+  color: #334155;
+  font-size: 13px;
+  text-align: left;
+}
+
+td, th {
+  padding: 10px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+td input, td select, td textarea {
+  margin-top: 0;
+}
+
+.summary {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+}
+
+.summary div {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 16px;
+  text-align: center;
+}
+
+.summary span {
+  display: block;
+  font-size: 28px;
+  font-weight: bold;
+  color: #173b63;
+}
+
+.summary small {
+  color: #64748b;
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 30px;
+}
+
+@media (max-width: 800px) {
+  .grid, .summary {
+    grid-template-columns: 1fr;
+  }
+
+  .section-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  button {
+    width: 100%;
+  }
+}
+"""
+
+script_js = """const itemsBase = [
+  ["Recepción", "Escritorio", 1, "Bueno", ""],
+  ["Recepción", "Silla", 1, "Bueno", ""],
+  ["Recepción", "Computadora", 1, "Bueno", ""],
+  ["Sala de reuniones", "Mesa", 1, "Bueno", ""],
+  ["Sala de reuniones", "Sillas", 6, "Bueno", ""],
+  ["Sala de reuniones", "Proyector / TV", 1, "Bueno", ""],
+  ["Oficina administrativa", "Archivador", 1, "Bueno", ""],
+  ["Oficina administrativa", "Impresora", 1, "Bueno", ""],
+  ["Servicios higiénicos", "Lavatorio", 1, "Bueno", ""],
+  ["Servicios higiénicos", "Dispensador de jabón", 1, "Bueno", ""],
+  ["Kitchenette", "Microondas", 1, "Bueno", ""],
+  ["Kitchenette", "Mesa / repostero", 1, "Bueno", ""]
+];
+
+document.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("fecha").valueAsDate = new Date();
+
+  const guardado = localStorage.getItem("checklistOficinas");
+  if (guardado) {
+    cargarGuardado(JSON.parse(guardado));
+  } else {
+    itemsBase.forEach(item => agregarFila(item));
+  }
+
+  actualizarResumen();
+});
+
+function agregarFila(datos = ["", "", 1, "Bueno", ""]) {
+  const tbody = document.getElementById("cuerpoTabla");
+  const tr = document.createElement("tr");
+
+  tr.innerHTML = `
+    <td><input type="text" value="${datos[0]}" placeholder="Ambiente"></td>
+    <td><input type="text" value="${datos[1]}" placeholder="Ítem"></td>
+    <td><input type="number" min="0" value="${datos[2]}"></td>
+    <td>
+      <select onchange="actualizarResumen()">
+        <option ${datos[3] === "Bueno" ? "selected" : ""}>Bueno</option>
+        <option ${datos[3] === "Regular" ? "selected" : ""}>Regular</option>
+        <option ${datos[3] === "Malo" ? "selected" : ""}>Malo</option>
+        <option ${datos[3] === "Faltante" ? "selected" : ""}>Faltante</option>
+        <option ${datos[3] === "No aplica" ? "selected" : ""}>No aplica</option>
+      </select>
+    </td>
+    <td><textarea placeholder="Observación">${datos[4]}</textarea></td>
+    <td><button class="danger" onclick="eliminarFila(this)">Eliminar</button></td>
+  `;
+
+  tbody.appendChild(tr);
+  actualizarResumen();
+}
+
+function eliminarFila(btn) {
+  btn.closest("tr").remove();
+  actualizarResumen();
+}
+
+function obtenerDatos() {
+  const filas = [...document.querySelectorAll("#cuerpoTabla tr")];
+
+  return {
+    fecha: document.getElementById("fecha").value,
+    inspector: document.getElementById("inspector").value,
+    sede: document.getElementById("sede").value,
+    area: document.getElementById("area").value,
+    items: filas.map(fila => {
+      const campos = fila.querySelectorAll("input, select, textarea");
+      return {
+        ambiente: campos[0].value,
+        item: campos[1].value,
+        cantidad: campos[2].value,
+        estado: campos[3].value,
+        observacion: campos[4].value
+      };
+    })
+  };
+}
+
+function guardar() {
+  localStorage.setItem("checklistOficinas", JSON.stringify(obtenerDatos()));
+  alert("Checklist guardado correctamente.");
+}
+
+function cargarGuardado(data) {
+  document.getElementById("fecha").value = data.fecha || "";
+  document.getElementById("inspector").value = data.inspector || "";
+  document.getElementById("sede").value = data.sede || "";
+  document.getElementById("area").value = data.area || "";
+
+  document.getElementById("cuerpoTabla").innerHTML = "";
+  data.items.forEach(x => agregarFila([
+    x.ambiente,
+    x.item,
+    x.cantidad,
+    x.estado,
+    x.observacion
+  ]));
+}
+
+function actualizarResumen() {
+  const estados = [...document.querySelectorAll("#cuerpoTabla select")].map(x => x.value);
+
+  document.getElementById("total").textContent = estados.length;
+  document.getElementById("bueno").textContent = estados.filter(x => x === "Bueno").length;
+  document.getElementById("regular").textContent = estados.filter(x => x === "Regular").length;
+  document.getElementById("malo").textContent = estados.filter(x => x === "Malo").length;
+  document.getElementById("faltante").textContent = estados.filter(x => x === "Faltante").length;
+}
+
+function descargarCSV() {
+  const data = obtenerDatos();
+
+  let csv = "Fecha,Inspector,Sede,Area,Ambiente,Item,Cantidad,Estado,Observacion\\n";
+
+  data.items.forEach(x => {
+    csv += [
+      data.fecha,
+      data.inspector,
+      data.sede,
+      data.area,
+      x.ambiente,
+      x.item,
+      x.cantidad,
+      x.estado,
+      x.observacion
+    ].map(valor => `"${String(valor).replaceAll('"', '""')}"`).join(",") + "\\n";
+  });
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+
+  a.href = url;
+  a.download = "checklist_oficinas.csv";
+  a.click();
+
+  URL.revokeObjectURL(url);
+}
+
+function limpiar() {
+  if (confirm("¿Seguro que deseas borrar todo el checklist?")) {
+    localStorage.removeItem("checklistOficinas");
+    document.getElementById("cuerpoTabla").innerHTML = "";
+    itemsBase.forEach(item => agregarFila(item));
+    actualizarResumen();
+  }
+}
+"""
+
+readme = """# Checklist de Oficinas
+
+Sistema web simple para registrar qué cosas hay en oficinas y en qué estado se encuentran.
+
+## Archivos
+
+- `index.html`
+- `style.css`
+- `script.js`
+
+## Cómo usar
+
+1. Subir los 3 archivos a GitHub.
+2. Abrir `index.html`.
+3. Completar el checklist.
+4. Guardar avance.
+5. Descargar reporte en CSV, que se puede abrir en Excel.
+
+## Estados disponibles
+
+- Bueno
+- Regular
+- Malo
+- Faltante
+- No aplica
+"""
+
+(base / "index.html").write_text(index_html, encoding="utf-8")
+(base / "style.css").write_text(style_css, encoding="utf-8")
+(base / "script.js").write_text(script_js, encoding="utf-8")
+(base / "README.md").write_text(readme, encoding="utf-8")
+
+zip_path = Path("/mnt/data/checklist_oficinas_github.zip")
+with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+    for file in base.iterdir():
+        z.write(file, arcname=file.name)
+
+zip_path
